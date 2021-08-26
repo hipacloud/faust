@@ -941,9 +941,26 @@ class AIOKafkaConsumerThread(ConsumerThread):
     async def _highwaters(self, partitions: List[TP]) -> Mapping[TP, int]:
         consumer = self._ensure_consumer()
         if self.consumer.in_transaction:
-            return {tp: consumer.last_stable_offset(tp) for tp in partitions}
+            stable_offsets = await asyncio.gather(*[self._lso(tp) for tp in partitions])
+            return {tp: lso for tp, lso in zip(partitions, stable_offsets)}
         else:
             return cast(Mapping[TP, int], await consumer.end_offsets(partitions))
+
+    async def _lso(self, tp: TP) -> int:
+        consumer = self._ensure_consumer()
+
+        num_attempted = 0
+        lso = consumer.last_stable_offset(tp)
+
+        while lso is None:
+            if num_attempted > 100:
+                raise IllegalStateError(f"Failed to get last stable offset for {tp}")
+
+            num_attempted += 1
+            await asyncio.sleep(0.1)
+            lso = consumer.last_stable_offset(tp)
+
+        return lso
 
     def _ensure_consumer(self) -> aiokafka.AIOKafkaConsumer:
         if self._consumer is None:
