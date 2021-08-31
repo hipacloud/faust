@@ -1342,6 +1342,16 @@ class Settings(base.SettingsRegistry):
         """
 
     @sections.Stream.setting(
+        params.Seconds,
+        version_introduced="0.6.10",
+        env_name="CHECKPOINT_INTERVAL",
+        default=60.0,
+    )
+    def checkpoint_interval(self) -> float:
+        """Time interval in seconds between successive of store states
+        """
+
+    @sections.Stream.setting(
         params.Bool,
         version_introduced="0.4.7",
         env_name="RECOVERY_CONSISTENCY_CHECK",

@@ -1,10 +1,11 @@
 """Base class Collection for Table and future data structures."""
 import abc
 import time
+import typing
 from collections import defaultdict
 from contextlib import suppress
 from datetime import datetime
-from functools import lru_cache
+from functools import lru_cache, partial
 from heapq import heappop, heappush
 from typing import (
     Any,
@@ -27,7 +28,7 @@ from mode import Seconds, Service
 from mode.utils.futures import maybe_async
 from yarl import URL
 
-from faust import joins, stores
+from faust import joins, stores, Event
 from faust.exceptions import PartitionsMismatch
 from faust.streams import current_event
 from faust.types import (
@@ -66,6 +67,14 @@ topic {change_topic!r} has {change_n} partitions.
 Please make sure the topics have the same number of partitions
 by configuring Kafka correctly.
 """
+
+
+if typing.TYPE_CHECKING:  # pragma: no cover
+    pass
+    # from ..events import Event
+else:
+    class _App:
+        pass
 
 
 class Collection(Service, CollectionT):
@@ -265,16 +274,23 @@ class Collection(Service, CollectionT):
             key_serializer = self.key_serializer
         if value_serializer is None:
             value_serializer = self.value_serializer
-        return self.changelog_topic.send_soon(
-            key=key,
-            value=value,
+
+        event = cast(Event, current_event())
+        callback = partial(
+            self._on_changelog_sent_2,
+            event,
+        )
+
+        fut = event._attach(
+            self.changelog_topic,
+            key,
+            value,
             partition=partition,
             key_serializer=key_serializer,
             value_serializer=value_serializer,
-            callback=self._on_changelog_sent,
-            # Ensures final partition number is ready in ret.message.partition
-            eager_partitioning=True,
+            callback=callback,
         )
+        return cast(FutureMessage, fut)
 
     def _send_changelog(
         self,
@@ -329,6 +345,28 @@ class Collection(Service, CollectionT):
                             change_n=change_n,
                         ),
                     )
+
+    def _on_changelog_sent_2(self, event: Event, fut: FutureMessage) -> None:
+        # This is what keeps the offset in RocksDB so that at startup
+        # we know what offsets we already have data for in the database.
+        #
+        # Kafka Streams has a global ".checkpoint" file, but we store
+        # it in each individual RocksDB database file.
+        # Every partition in the table will have its own database file,
+        #  this is required as partitions can easily move from and to
+        #  machine as nodes die and recover.
+        res: RecordMetadata = fut.result()
+        if self.app.in_transaction:
+            # for exactly-once semantics we only write the
+            # persisted offset to RocksDB on disk when that partition
+            # is committed.
+            self.app.tables.persist_offset_on_commit(
+                self.data, event.message.tp, res.offset
+            )
+        else:
+            # for normal processing (at-least-once) we just write
+            # the persisted offset immediately.
+            self.data.set_persisted_offset(event.message.tp, res.offset)
 
     def _on_changelog_sent(self, fut: FutureMessage) -> None:
         # This is what keeps the offset in RocksDB so that at startup

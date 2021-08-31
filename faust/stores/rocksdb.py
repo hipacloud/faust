@@ -6,6 +6,7 @@ import shutil
 import typing
 from collections import defaultdict
 from contextlib import suppress
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import (
     Any,
@@ -24,13 +25,12 @@ from typing import (
     cast,
 )
 
-from mode.utils.collections import LRUCache
-from yarl import URL
-
 from faust.exceptions import ImproperlyConfigured
 from faust.streams import current_event
 from faust.types import TP, AppT, CollectionT, EventT
 from faust.utils import platforms
+from mode.utils.collections import LRUCache
+from yarl import URL
 
 from . import base
 
@@ -180,6 +180,8 @@ class Store(base.SerializedStore):
             key_index_size = app.conf.table_key_index_size
         self.key_index_size = key_index_size
         self._dbs = {}
+        self._last_checkpoints = {}
+        self.checkpoint_interval = timedelta(seconds=app.conf.checkpoint_interval)
         self._key_index = LRUCache(limit=self.key_index_size)
         self.db_lock = asyncio.Lock()
         self.rebalance_ack = False
@@ -202,7 +204,16 @@ class Store(base.SerializedStore):
         to only read the events that occurred recently while
         we were not an active replica.
         """
-        self._db_for_partition(tp.partition).put(self.offset_key, str(offset).encode())
+        db = self._db_for_partition(tp.partition)
+        db.put(self.offset_key, str(offset).encode())
+
+        last_checkpointed = self._last_checkpoints.get(tp)
+        if not last_checkpointed or (datetime.utcnow() - last_checkpointed) > self.checkpoint_interval:
+            backup_engine = rocksdb.BackupEngine(str(self.backup_path(tp.partition)))
+            backup_engine.create_backup(db, flush_before_backup=True)
+            backup_engine.purge_old_backups(2)
+            self._last_checkpoints[tp] = datetime.utcnow()
+            self.logger.info(f"Checkpointed rocksdb state for {tp}")
 
     async def need_active_standby_for(self, tp: TP) -> bool:
         """Decide if an active standby is needed for this topic partition.
@@ -368,12 +379,19 @@ class Store(base.SerializedStore):
             tps: Set of topic partitions that we should no longer
                 be serving data for.
         """
+        standby_tps = self.app.assignor.assigned_standbys()
+
         for tp in tps:
+            if tp in standby_tps:
+                self._recover_db(tp, True)
+
             if tp.topic in table.changelog_topic.topics:
                 db = self._dbs.pop(tp.partition, None)
+                self._last_checkpoints.pop(tp.partition, None)
                 if db is not None:
                     self.logger.info(f"closing db {tp.topic} partition {tp.partition}")
                     # db.close()
+
         gc.collect()
 
     async def assign_partitions(
@@ -389,11 +407,32 @@ class Store(base.SerializedStore):
         standby_tps = self.app.assignor.assigned_standbys()
         my_topics = table.changelog_topic.topics
         for tp in tps:
-            if tp.topic in my_topics and tp not in standby_tps and self.rebalance_ack:
-                await self._try_open_db_for_partition(
-                    tp.partition, generation_id=generation_id
-                )
+            if tp.topic in my_topics:
+                is_standby = tp in standby_tps
+                self._recover_db(tp, is_standby)
+
+                if not is_standby and self.rebalance_ack:
+                    await self._try_open_db_for_partition(
+                        tp.partition, generation_id=generation_id
+                    )
                 await asyncio.sleep(0)
+
+    def _recover_db(self, tp: TP, is_standby: bool) -> None:
+        db_path = self.partition_path(tp.partition)
+        backup_engine = rocksdb.BackupEngine(str(self.backup_path(tp.partition)))
+        backups = backup_engine.get_backup_info()
+        tp_mode = "standby" if is_standby else "active"
+
+        if backups:
+            backup_engine.restore_latest_backup(str(db_path), str(db_path))
+            backup_info = backups[-1]
+            backup_id = backup_info['backup_id']
+            backup_time = datetime.fromtimestamp(backup_info['timestamp'])
+            self.logger.info(f"Recovered rocksdb state for {tp_mode} {tp} from backup {backup_id}, {backup_time}")
+
+        elif db_path.exists():
+            db_path.rmdir()
+            self.logger.info(f"Cleared rocksdb state for {tp} as no backup found")
 
     async def _try_open_db_for_partition(
         self,
@@ -518,14 +557,20 @@ class Store(base.SerializedStore):
             in Kafka will not be affected.
         """
         self._dbs.clear()
+        self._last_checkpoints.clear()
         self._key_index.clear()
-        with suppress(FileNotFoundError):
-            shutil.rmtree(self.path.absolute())
+        # with suppress(FileNotFoundError):
+        #     shutil.rmtree(self.path.absolute())
 
     def partition_path(self, partition: int) -> Path:
         """Return :class:`pathlib.Path` to db file of specific partition."""
         p = self.path / self.basename
         return self._path_with_suffix(p.with_name(f"{p.name}-{partition}"))
+
+    def backup_path(self, partition: int) -> Path:
+        """Return :class:`pathlib.Path` to db file of specific partition."""
+        p = self.path / self.basename
+        return self._path_with_suffix(p.with_name(f"{p.name}-{partition}"), suffix=".bak")
 
     def _path_with_suffix(self, path: Path, *, suffix: str = ".db") -> Path:
         # Path.with_suffix should not be used as this will
