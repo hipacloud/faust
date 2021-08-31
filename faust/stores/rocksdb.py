@@ -5,7 +5,6 @@ import math
 import shutil
 import typing
 from collections import defaultdict
-from contextlib import suppress
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import (
@@ -25,13 +24,13 @@ from typing import (
     cast,
 )
 
+from mode.utils.collections import LRUCache
+from yarl import URL
+
 from faust.exceptions import ImproperlyConfigured
 from faust.streams import current_event
 from faust.types import TP, AppT, CollectionT, EventT
 from faust.utils import platforms
-from mode.utils.collections import LRUCache
-from yarl import URL
-
 from . import base
 
 _max_open_files = platforms.max_open_files()
@@ -210,7 +209,7 @@ class Store(base.SerializedStore):
         last_checkpointed = self._last_checkpoints.get(tp)
         if not last_checkpointed or (datetime.utcnow() - last_checkpointed) > self.checkpoint_interval:
             backup_engine = rocksdb.BackupEngine(str(self.backup_path(tp.partition)))
-            backup_engine.create_backup(db, flush_before_backup=True)
+            backup_engine.create_backup(db)
             backup_engine.purge_old_backups(2)
             self._last_checkpoints[tp] = datetime.utcnow()
             self.logger.info(f"Checkpointed rocksdb state for {tp}")
@@ -418,6 +417,11 @@ class Store(base.SerializedStore):
                 await asyncio.sleep(0)
 
     def _recover_db(self, tp: TP, is_standby: bool) -> None:
+        try:
+            del self._dbs[tp.partition]  # db needs to be re-opened
+        except KeyError:
+            pass
+
         db_path = self.partition_path(tp.partition)
         backup_engine = rocksdb.BackupEngine(str(self.backup_path(tp.partition)))
         backups = backup_engine.get_backup_info()
@@ -431,8 +435,8 @@ class Store(base.SerializedStore):
             self.logger.info(f"Recovered rocksdb state for {tp_mode} {tp} from backup {backup_id}, {backup_time}")
 
         elif db_path.exists():
-            db_path.rmdir()
-            self.logger.info(f"Cleared rocksdb state for {tp} as no backup found")
+            shutil.rmtree(db_path)
+            self.logger.info(f"Cleared rocksdb state for {tp} as no stable backup found")
 
     async def _try_open_db_for_partition(
         self,
@@ -560,7 +564,7 @@ class Store(base.SerializedStore):
         self._last_checkpoints.clear()
         self._key_index.clear()
         # with suppress(FileNotFoundError):
-        #     shutil.rmtree(self.path.absolute())
+        #     shutil.(self.path.absolute())
 
     def partition_path(self, partition: int) -> Path:
         """Return :class:`pathlib.Path` to db file of specific partition."""
