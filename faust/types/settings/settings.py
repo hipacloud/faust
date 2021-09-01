@@ -1343,7 +1343,7 @@ class Settings(base.SettingsRegistry):
 
     @sections.Stream.setting(
         params.Seconds,
-        version_introduced="0.6.10",
+        version_introduced="0.6.11",
         env_name="CHECKPOINT_INTERVAL",
         default=60.0,
     )
