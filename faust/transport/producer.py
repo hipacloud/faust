@@ -138,6 +138,7 @@ class Producer(Service, ProducerT):
         self.max_request_size = conf.producer_max_request_size
         self.compression_type = conf.producer_compression_type
         self.request_timeout = conf.producer_request_timeout
+        self.transaction_timeout = conf.producer_transaction_timeout
         self.ssl_context = conf.ssl_context
         self.credentials = conf.broker_credentials
         self.partitioner = conf.producer_partitioner

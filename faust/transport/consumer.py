@@ -947,6 +947,7 @@ class Consumer(Service, ConsumerT):
         return commit_offsets
 
     async def _handle_attached(self, commit_offsets: Mapping[TP, int]) -> None:
+        futures: List[Awaitable[RecordMetadata]] = []
         for tp, offset in commit_offsets.items():
             app = cast(_App, self.app)
             attachments = app._attachments
@@ -954,6 +955,8 @@ class Consumer(Service, ConsumerT):
             # Start publishing the messages and return a list of pending
             # futures.
             pending = await attachments.publish_for_tp_offset(tp, offset)
+            if pending:
+                futures.extend(pending)
             # then we wait for either
             #  1) all the attached messages to be published, or
             #  2) the producer crashing
@@ -963,8 +966,10 @@ class Consumer(Service, ConsumerT):
             #
             # If we cannot commit it means the events will be processed again,
             # so conforms to at-least-once semantics.
-            if pending:
-                await cast(Service, producer).wait_many(pending)
+        if futures:
+            self.log.info(f"Publishing attached messages for {commit_offsets}")
+            await cast(Service, producer).wait_many(futures)
+            self.log.info(f"Published attached messages for {commit_offsets}")
 
     async def _commit_offsets(
         self, offsets: Mapping[TP, int], start_new_transaction: bool = True
@@ -995,10 +1000,12 @@ class Consumer(Service, ConsumerT):
             did_commit = False
             on_timeout.info("+consumer.commit()")
             if self.in_transaction:
+                self.log.info(f"Committing offset: {committable_offsets}")
                 did_commit = await self.transactions.commit(
                     committable_offsets,
                     start_new_transaction=start_new_transaction,
                 )
+                self.log.info(f"Committed offset: {committable_offsets}")
             else:
                 did_commit = await self._commit(committable_offsets)
             on_timeout.info("-consumer.commit()")
@@ -1091,6 +1098,7 @@ class Consumer(Service, ConsumerT):
         yield_every = 100
         num_since_yield = 0
         sleep = asyncio.sleep
+        commit_catchup_time = self.app.conf.commit_catchup_time
 
         try:
             while not (consumer_should_stop() or fetcher_should_stop()):
@@ -1120,6 +1128,9 @@ class Consumer(Service, ConsumerT):
                                 if self._n_acked >= commit_every:
                                     self._n_acked = 0
                                     await self.commit()
+                                    self.log.info(f"Nacked {self._n_acked} above threshold {commit_every}, "
+                                                  f"wait {commit_catchup_time} to let commit catchup")
+                                    await sleep(commit_catchup_time)
                             await callback(message)
                             set_read_offset(tp, offset)
                         else:

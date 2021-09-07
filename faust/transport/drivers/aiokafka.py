@@ -1097,6 +1097,7 @@ class Producer(base.Producer):
             "security_protocol": "SSL" if self.ssl_context else "PLAINTEXT",
             "partitioner": self.partitioner,
             "request_timeout_ms": int(self.request_timeout * 1000),
+            "transaction_timeout_ms": int(self.transaction_timeout * 1000),
             "api_version": self._api_version,
         }
 

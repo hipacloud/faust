@@ -98,6 +98,7 @@ class Settings(base.SettingsRegistry):
         broker_client_id: str = None,
         broker_commit_every: int = None,
         broker_commit_interval: Seconds = None,
+        producer_transaction_timeout: Seconds = None,
         broker_commit_livelock_soft_timeout: Seconds = None,
         broker_credentials: CredentialsArg = None,
         broker_heartbeat_interval: Seconds = None,
@@ -816,6 +817,37 @@ class Settings(base.SettingsRegistry):
 
         How often we commit messages that have been
         fully processed (:term:`acked`).
+        """
+
+    @sections.Stream.setting(
+        params.Seconds,
+        version_introduced="1.10",
+        env_name="SLOW_PROCESSING_TIME",
+        default=0.5,
+    )
+    def slow_processing_time(self) -> float:
+        """The time threshold considered to be slow to processing a single event.
+        """
+
+    @sections.Stream.setting(
+        params.Seconds,
+        version_introduced="1.10",
+        env_name="COMMIT_CATCHUP_TIME",
+        default=1,
+    )
+    def commit_catchup_time(self) -> float:
+        """Time to yield for committing every `BROKER_COMMIT_EVERY` messages.
+        """
+
+    @sections.Broker.setting(
+        params.Seconds,
+        env_name="PRODUCER_TRANSACTION_TIMEOUT",
+        default=60,
+    )
+    def producer_transaction_timeout(self) -> float:
+        """The maximum amount of time in ms that the transaction coordinator
+         will wait for a transaction status update from the producer before
+         proactively aborting the ongoing transaction. Max: 900s (i.e. 15m)
         """
 
     @sections.Broker.setting(
@@ -1569,7 +1601,7 @@ class Settings(base.SettingsRegistry):
         default=0.0,
     )
     def stream_recovery_delay(self) -> float:
-        """Stream recovery delayl
+        """Stream recovery delay
 
         Number of seconds to sleep before continuing after rebalance.
         We wait for a bit to allow for more nodes to join/leave before

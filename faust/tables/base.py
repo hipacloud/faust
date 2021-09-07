@@ -270,27 +270,40 @@ class Collection(Service, CollectionT):
         value_serializer: CodecArg = None,
     ) -> FutureMessage:
         """Send modification event to changelog topic."""
-        if key_serializer is None:
-            key_serializer = self.key_serializer
-        if value_serializer is None:
-            value_serializer = self.value_serializer
+        if self.app.conf.stream_publish_on_commit:
+            if key_serializer is None:
+                key_serializer = self.key_serializer
+            if value_serializer is None:
+                value_serializer = self.value_serializer
 
-        event = cast(Event, current_event())
-        callback = partial(
-            self._on_changelog_sent_2,
-            event,
-        )
+            event = cast(Event, current_event())
+            callback = partial(
+                self._on_attached_changelog_sent,
+                event,
+            )
 
-        fut = event._attach(
-            self.changelog_topic,
-            key,
-            value,
-            partition=partition,
-            key_serializer=key_serializer,
-            value_serializer=value_serializer,
-            callback=callback,
-        )
-        return cast(FutureMessage, fut)
+            fut = event._attach(
+                self.changelog_topic,
+                key,
+                value,
+                partition=partition,
+                key_serializer=key_serializer,
+                value_serializer=value_serializer,
+                callback=callback,
+            )
+            return cast(FutureMessage, fut)
+
+        else:
+            return self.changelog_topic.send_soon(
+                key=key,
+                value=value,
+                partition=partition,
+                key_serializer=key_serializer,
+                value_serializer=value_serializer,
+                callback=self._on_changelog_sent,
+                # Ensures final partition number is ready in ret.message.partition
+                eager_partitioning=True,
+            )
 
     def _send_changelog(
         self,
@@ -346,7 +359,7 @@ class Collection(Service, CollectionT):
                         ),
                     )
 
-    def _on_changelog_sent_2(self, event: Event, fut: FutureMessage) -> None:
+    def _on_attached_changelog_sent(self, event: Event, fut: FutureMessage) -> None:
         # This is what keeps the offset in RocksDB so that at startup
         # we know what offsets we already have data for in the database.
         #
