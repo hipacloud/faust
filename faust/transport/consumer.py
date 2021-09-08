@@ -1126,10 +1126,11 @@ class Consumer(Service, ConsumerT):
                                     self._add_gap(tp, r_offset + 1, offset)
                             if commit_every is not None:
                                 if self._n_acked >= commit_every:
+                                    n_acked = self._n_acked
                                     self._n_acked = 0
                                     await self.commit()
-                                    self.log.info(f"Nacked {self._n_acked} above threshold {commit_every}, "
-                                                  f"wait {commit_catchup_time} to let commit catchup")
+                                    self.log.info(f"Nacked {n_acked} above threshold {commit_every}, "
+                                                  f"wait {commit_catchup_time}s to let commit catchup")
                                     await sleep(commit_catchup_time)
                             await callback(message)
                             set_read_offset(tp, offset)

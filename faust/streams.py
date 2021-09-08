@@ -922,8 +922,8 @@ class Stream(StreamT[T_co], Service):
                     sample_proc_times.put(proc_time)
                     avg_proc_time = sum(sample_proc_times._ring) / sample_proc_times.size
                     if avg_proc_time > self.app.conf.slow_processing_time:
-                        self.log.info(f"Sampled avg proc time {avg_proc_time}, "
-                                      f"wait {commit_catchup_slice} to let commit catchup")
+                        self.log.info(f"Sampled avg proc time {avg_proc_time}s too slow"
+                                      f"wait {commit_catchup_slice}s to let commit catchup")
                         await asyncio.sleep(commit_catchup_slice)
                 finally:
                     self.current_event = None
