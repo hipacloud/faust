@@ -3,6 +3,7 @@ import asyncio
 import gc
 import math
 import shutil
+import time
 import typing
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -208,11 +209,13 @@ class Store(base.SerializedStore):
 
         last_checkpointed = self._last_checkpoints.get(tp)
         if not last_checkpointed or (datetime.utcnow() - last_checkpointed) > self.checkpoint_interval:
+            start = time.time()
             backup_engine = rocksdb.BackupEngine(str(self.backup_path(tp.partition)))
             backup_engine.create_backup(db)
             backup_engine.purge_old_backups(2)
             self._last_checkpoints[tp] = datetime.utcnow()
-            self.logger.info(f"Checkpointed rocksdb state for {tp}")
+            elapsed = time.time() - start
+            self.logger.info(f"Checkpointed rocksdb state for {tp}, took: {elapsed}")
 
     async def need_active_standby_for(self, tp: TP) -> bool:
         """Decide if an active standby is needed for this topic partition.
@@ -428,11 +431,14 @@ class Store(base.SerializedStore):
         tp_mode = "standby" if is_standby else "active"
 
         if backups:
+            start = time.time()
             backup_engine.restore_latest_backup(str(db_path), str(db_path))
             backup_info = backups[-1]
             backup_id = backup_info['backup_id']
             backup_time = datetime.fromtimestamp(backup_info['timestamp'])
-            self.logger.info(f"Recovered rocksdb state for {tp_mode} {tp} from backup {backup_id}, {backup_time}")
+            elapsed = time.time() - start
+            self.logger.info(f"Recovered rocksdb state for {tp_mode} {tp} "
+                             f"from backup {backup_id}, {backup_time}, took: {elapsed}")
 
         elif db_path.exists():
             shutil.rmtree(db_path)
