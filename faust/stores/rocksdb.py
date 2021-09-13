@@ -47,6 +47,7 @@ DEFAULT_BLOOM_FILTER_SIZE = 3
 
 try:  # pragma: no cover
     import rocksdb
+    from rocksdb.errors import Corruption
 except ImportError:  # pragma: no cover
     rocksdb = None  # noqa
 
@@ -298,7 +299,13 @@ class Store(base.SerializedStore):
             return db
 
     def _open_for_partition(self, partition: int) -> DB:
-        return self.rocksdb_options.open(self.partition_path(partition))
+        db_path = self.partition_path(partition)
+        try:
+            return self.rocksdb_options.open(db_path)
+        except Corruption:  # db file corrupted, clear and reopen
+            self.log.exception("RocksDB files corrupted: {}, remove corrupted files and re-open", db_path)
+            shutil.rmtree(db_path)
+            return self.rocksdb_options.open(db_path)
 
     def _get(self, key: bytes) -> Optional[bytes]:
         event = current_event()
