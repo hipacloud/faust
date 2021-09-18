@@ -317,6 +317,7 @@ codecs: MutableMapping[str, CodecT] = {
     "binary": binary(),
     "raw": raw(),
     "yaml": yaml(),
+    "raw_pickle": raw_pickle(),
 }
 
 #: Cached extension classes.
