@@ -104,7 +104,7 @@ class CachingRocksDbStore(RocksDbStore):
             decoded_key = self._decode_key(msg.key)
 
             if msg.value is None:
-                del self._cache[partition][decoded_key]
+                self._cache[partition].pop(decoded_key, None)
             else:
                 decoded_val = self._decode_value(msg.value)
                 self._cache[partition][decoded_key] = decoded_val
