@@ -107,6 +107,8 @@ class Registry(RegistryT):
     def _prepare_payload(self, typ: Optional[ModelArg], value: Any) -> Any:
         if typ is None:  # (autodetect)
             return self.Model._maybe_reconstruct(value)
+        elif isinstance(value, typ):
+            return value
         elif typ is int:
             return int(want_str(value))
         elif typ is float:
