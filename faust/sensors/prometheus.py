@@ -1,8 +1,10 @@
 """Monitor using Prometheus."""
+import time
 import typing
 from typing import Any, NamedTuple, cast
 
 from aiohttp.web import Response
+from prometheus_client.utils import INF
 
 from faust import web, web as _web
 from faust.exceptions import ImproperlyConfigured
@@ -63,12 +65,54 @@ def setup_prometheus_sensors(
         )
 
 
+BUCKETS_S = (
+    0.01,
+    0.025,
+    0.05,
+    0.075,
+    0.1,
+    0.25,
+    0.5,
+    0.75,
+    1.0,
+    2.5,
+    5.0,
+    7.5,
+    10.0,
+    15.0,
+    20.0,
+    25.0,
+    30.0,
+    INF,
+)
+BUCKETS_MS = (
+    0.5,
+    1.0,
+    2.5,
+    5.0,
+    7.5,
+    10.0,
+    25.0,
+    50.0,
+    75.0,
+    100.0,
+    250.0,
+    500.0,
+    750,
+    1000.0,
+    2500.0,
+    INF,
+)
+
+
 class FaustMetrics(NamedTuple):
     messages_received: Counter
     active_messages: Gauge
     messages_received_per_topics: Counter
     messages_received_per_topics_partition: Gauge
     events_runtime_latency: Histogram
+    events_receive_latency: Histogram
+    events_end2end_latency: Histogram
 
     # On Event Stream in
     total_events: Counter
@@ -130,7 +174,22 @@ class FaustMetrics(NamedTuple):
             registry=registry,
         )
         events_runtime_latency = Histogram(
-            f"{app_name}_events_runtime_ms", "Events runtime in ms", registry=registry
+            f"{app_name}_events_runtime_ms",
+            "Events runtime in ms",
+            registry=registry,
+            buckets=BUCKETS_MS,
+        )
+        events_receive_latency = Histogram(
+            f"{app_name}_events_receive_s",
+            "Events receive lag in second",
+            registry=registry,
+            buckets=BUCKETS_S,
+        )
+        events_end2end_latency = Histogram(
+            f"{app_name}_events_end2end_s",
+            "Events end2end lag in second",
+            registry=registry,
+            buckets=BUCKETS_S,
         )
         total_events = Counter(
             f"{app_name}_total_events", "Total events received", registry=registry
@@ -241,6 +300,8 @@ class FaustMetrics(NamedTuple):
                 messages_received_per_topics_partition
             ),
             events_runtime_latency=events_runtime_latency,
+            events_receive_latency=events_receive_latency,
+            events_end2end_latency=events_end2end_latency,
             total_events=total_events,
             total_active_events=total_active_events,
             total_events_per_stream=total_events_per_stream,
@@ -341,6 +402,25 @@ class PrometheusMonitor(Monitor):
         self._metrics.total_events_per_stream.labels(
             stream=f"stream.{self._stream_label(stream)}.events"
         ).inc()
+
+        now = time.time()
+        self._metrics.events_receive_latency.observe(
+            now - event.message.timestamp
+        )
+
+        headers = event.message.headers
+        if headers:
+            if isinstance(headers, dict):
+                event_orig_time = headers.get("originating-time")
+            else:
+                event_orig_time = next(
+                    (v for k, v in headers if k == "originating-time"), None
+                )
+
+            if event_orig_time:
+                self._metrics.events_end2end_latency.observe(
+                    now - float(event_orig_time.decode("ascii"))
+                )
 
         return state
 
