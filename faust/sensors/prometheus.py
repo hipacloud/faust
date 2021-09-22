@@ -66,27 +66,33 @@ def setup_prometheus_sensors(
 
 
 BUCKETS_S = (
-    0.01,
+    0.001,
+    0.005,
+    0.010,
     0.025,
-    0.05,
+    0.050,
     0.075,
-    0.1,
-    0.25,
-    0.5,
-    0.75,
+    0.100,
+    0.250,
+    0.500,
+    0.750,
     1.0,
     2.5,
     5.0,
     7.5,
     10.0,
-    15.0,
     20.0,
-    25.0,
     30.0,
+    600.0,
     INF,
 )
 BUCKETS_MS = (
-    0.5,
+    0.001,
+    0.005,
+    0.010,
+    0.050,
+    0.100,
+    0.500,
     1.0,
     2.5,
     5.0,
@@ -98,9 +104,7 @@ BUCKETS_MS = (
     100.0,
     250.0,
     500.0,
-    750,
     1000.0,
-    2500.0,
     INF,
 )
 
@@ -222,6 +226,7 @@ class FaustMetrics(NamedTuple):
             f"{app_name}_producer_send_latency",
             "Producer send latency in ms",
             registry=registry,
+            buckets=BUCKETS_MS,
         )
         total_error_messages_sent = Counter(
             f"{app_name}_total_error_messages_sent",
@@ -232,6 +237,7 @@ class FaustMetrics(NamedTuple):
             f"{app_name}_producer_error_send_latency",
             "Producer error send latency in ms",
             registry=registry,
+            buckets=BUCKETS_MS,
         )
         assignment_operations = Counter(
             f"{app_name}_assignment_operations",
@@ -240,7 +246,10 @@ class FaustMetrics(NamedTuple):
             registry=registry,
         )
         assign_latency = Histogram(
-            f"{app_name}_assign_latency", "Assignment latency in ms", registry=registry
+            f"{app_name}_assign_latency",
+            "Assignment latency in ms",
+            registry=registry,
+            buckets=BUCKETS_MS,
         )
         total_rebalances = Gauge(
             f"{app_name}_total_rebalances", "Total rebalances", registry=registry
@@ -254,11 +263,13 @@ class FaustMetrics(NamedTuple):
             f"{app_name}_rebalance_done_consumer_latency",
             "Consumer replying that rebalance is done to broker in ms",
             registry=registry,
+            buckets=BUCKETS_MS,
         )
         rebalance_done_latency = Histogram(
             f"{app_name}_rebalance_done_latency",
             "Rebalance finished latency in ms",
             registry=registry,
+            buckets=BUCKETS_MS,
         )
         count_metrics_by_name = Gauge(
             f"{app_name}_metrics_by_name",
@@ -273,7 +284,10 @@ class FaustMetrics(NamedTuple):
             registry=registry,
         )
         http_latency = Histogram(
-            f"{app_name}_http_latency", "Http response latency in ms", registry=registry
+            f"{app_name}_http_latency",
+            "Http response latency in ms",
+            registry=registry,
+            buckets=BUCKETS_MS,
         )
         topic_partition_end_offset = Gauge(
             f"{app_name}_topic_partition_end_offset",
@@ -291,6 +305,7 @@ class FaustMetrics(NamedTuple):
             f"{app_name}_consumer_commit_latency",
             "Consumer commit latency in ms",
             registry=registry,
+            buckets=BUCKETS_MS,
         )
         return cls(
             messages_received=messages_received,
@@ -404,9 +419,7 @@ class PrometheusMonitor(Monitor):
         ).inc()
 
         now = time.time()
-        self._metrics.events_receive_latency.observe(
-            now - event.message.timestamp
-        )
+        self._metrics.events_receive_latency.observe(now - event.message.timestamp)
 
         headers = event.message.headers
         if headers:
