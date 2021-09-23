@@ -820,10 +820,20 @@ class Settings(base.SettingsRegistry):
         """
 
     @sections.Stream.setting(
+        params.UnsignedInt,
+        version_introduced="1.10",
+        env_name="SLOW_SAMPLE_SIZE",
+        default=10,
+    )
+    def slow_sample_size(self) -> float:
+        """No. of recent events to include when calculate avg process time.
+        """
+
+    @sections.Stream.setting(
         params.Seconds,
         version_introduced="1.10",
         env_name="SLOW_PROCESSING_TIME",
-        default=0.5,
+        default=0.1,
     )
     def slow_processing_time(self) -> float:
         """The time threshold considered to be slow to processing a single event.
@@ -833,7 +843,7 @@ class Settings(base.SettingsRegistry):
         params.Seconds,
         version_introduced="1.10",
         env_name="COMMIT_CATCHUP_TIME",
-        default=1,
+        default=0.001,
     )
     def commit_catchup_time(self) -> float:
         """Time to yield for committing every `BROKER_COMMIT_EVERY` messages.
