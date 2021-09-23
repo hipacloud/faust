@@ -43,7 +43,7 @@ from .types.topics import ChannelT, TopicT
 from .types.transports import ProducerT
 
 if typing.TYPE_CHECKING:  # pragma: no cover
-    from .app import App as _App
+    pass
 else:
 
     class _App:
@@ -170,22 +170,6 @@ class Topic(SerializedChannel, TopicT):
         force: bool = False,
     ) -> Awaitable[RecordMetadata]:
         """Send message to topic."""
-        app = cast(_App, self.app)
-        if app._attachments.enabled and not force:
-            event = current_event()
-            if event is not None:
-                return cast(Event, event)._attach(
-                    self,
-                    key,
-                    value,
-                    partition=partition,
-                    timestamp=timestamp,
-                    headers=headers,
-                    schema=schema,
-                    key_serializer=key_serializer,
-                    value_serializer=value_serializer,
-                    callback=callback,
-                )
         return await self._send_now(
             key,
             value,
@@ -232,6 +216,38 @@ class Topic(SerializedChannel, TopicT):
             eager_partitioning=eager_partitioning,
         )
         self.app.producer.send_soon(fut)
+        return fut
+
+    def send_attached(
+        self,
+        *,
+        key: K = None,
+        value: V = None,
+        partition: int = None,
+        timestamp: float = None,
+        headers: HeadersArg = None,
+        schema: SchemaT = None,
+        key_serializer: CodecArg = None,
+        value_serializer: CodecArg = None,
+        callback: MessageSentCallback = None,
+        force: bool = False,
+        eager_partitioning: bool = False,
+    ) -> FutureMessage:
+        """Produce message and attach it to current event to commit as whole"""
+        fut = self.send_soon(
+            key=key,
+            value=value,
+            partition=partition,
+            timestamp=timestamp,
+            headers=headers,
+            schema=schema,
+            key_serializer=key_serializer,
+            value_serializer=value_serializer,
+            callback=callback,
+            force=force,
+            eager_partitioning=eager_partitioning,
+        )
+        cast(Event, current_event()).attach(fut)
         return fut
 
     async def put(self, event: EventT) -> None:
@@ -465,8 +481,7 @@ class Topic(SerializedChannel, TopicT):
             message.set_exception(exc)
             topic = message.message.channel.get_topic_name()
             logger.warning(
-                f"_on_published error. Topic: {topic}"
-                f" Message: {message}"
+                f"_on_published error. Topic: {topic}" f" Message: {message}"
             )
             self.app.sensors.on_send_error(producer, exc, state)
         else:

@@ -70,11 +70,11 @@ by configuring Kafka correctly.
 
 
 if typing.TYPE_CHECKING:  # pragma: no cover
-    pass
-    # from ..events import Event
+    from ..app.base import App as _App
 else:
+
     class _App:
-        pass
+        ...
 
 
 class Collection(Service, CollectionT):
@@ -163,8 +163,12 @@ class Collection(Service, CollectionT):
         # Setting Serializers from key_type and value_type
         # Possible values json and raw
         # Fallback to json
-        self.key_serializer = key_serializer or self._serializer_from_type(self.key_type)
-        self.value_serializer = value_serializer or self._serializer_from_type(self.value_type)
+        self.key_serializer = key_serializer or self._serializer_from_type(
+            self.key_type
+        )
+        self.value_serializer = value_serializer or self._serializer_from_type(
+            self.value_type
+        )
 
         # Table key expiration
         self._partition_timestamp_keys = defaultdict(set)
@@ -272,6 +276,7 @@ class Collection(Service, CollectionT):
         value_serializer: CodecArg = None,
     ) -> FutureMessage:
         """Send modification event to changelog topic."""
+
         if self.app.conf.stream_publish_on_commit:
             if key_serializer is None:
                 key_serializer = self.key_serializer
@@ -284,16 +289,17 @@ class Collection(Service, CollectionT):
                 event,
             )
 
-            fut = event._attach(
-                self.changelog_topic,
-                key,
-                value,
+            fut = self.changelog_topic.send_soon(
+                key=key,
+                value=value,
                 partition=partition,
                 key_serializer=key_serializer,
                 value_serializer=value_serializer,
                 callback=callback,
             )
-            return cast(FutureMessage, fut)
+
+            event.attach(fut)
+            return fut
 
         else:
             return self.changelog_topic.send_soon(

@@ -180,6 +180,15 @@ class Attachments:
         heappush(buf, Attachment(message.offset, Unordered(fut)))
         return fut
 
+    def put_fut(
+        self,
+        src_msg: Message,
+        fut_msg: FutureMessage,
+    ) -> None:
+        """Attach message to source topic offset."""
+        buf = self._pending[src_msg.tp]
+        heappush(buf, Attachment(src_msg.offset, Unordered(fut_msg)))
+
     async def commit(self, tp: TP, offset: int) -> None:
         """Publish all messaged attached to topic partition and offset."""
         await asyncio.wait(
@@ -195,13 +204,13 @@ class Attachments:
         # publish pending messages attached to this TP+offset
 
         # make shallow copy to allow concurrent modifications (append)
-        attached = list(self._attachments_for(tp, offset))
+        attached = list(self.attachments_for(tp, offset))
         return [
             await fut.message.channel.publish_message(fut, wait=False)
             for fut in attached
         ]
 
-    def _attachments_for(self, tp: TP, commit_offset: int) -> Iterator[FutureMessage]:
+    def attachments_for(self, tp: TP, commit_offset: int) -> Iterator[FutureMessage]:
         # Return attached messages for TopicPartition within committed offset.
         attached = self._pending.get(tp)
         while attached:

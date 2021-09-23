@@ -948,13 +948,15 @@ class Consumer(Service, ConsumerT):
 
     async def _handle_attached(self, commit_offsets: Mapping[TP, int]) -> None:
         futures: List[Awaitable[RecordMetadata]] = []
+
         for tp, offset in commit_offsets.items():
             app = cast(_App, self.app)
             attachments = app._attachments
             producer = app.producer
-            # Start publishing the messages and return a list of pending
-            # futures.
-            pending = await attachments.publish_for_tp_offset(tp, offset)
+
+            # Here we assuming attachments already in in-flight states
+            # i.e. `publish_message` already called for each of them
+            pending = list(attachments.attachments_for(tp, offset))
             if pending:
                 futures.extend(pending)
             # then we wait for either
@@ -966,6 +968,7 @@ class Consumer(Service, ConsumerT):
             #
             # If we cannot commit it means the events will be processed again,
             # so conforms to at-least-once semantics.
+
         if futures:
             self.log.info(f"Publishing attached messages for {commit_offsets}")
             await cast(Service, producer).wait_many(futures)
@@ -1129,8 +1132,10 @@ class Consumer(Service, ConsumerT):
                                     n_acked = self._n_acked
                                     self._n_acked = 0
                                     await self.commit()
-                                    self.log.info(f"Nacked {n_acked} above threshold {commit_every}, "
-                                                  f"wait {commit_catchup_time}s to let commit catchup")
+                                    self.log.info(
+                                        f"Nacked {n_acked} above threshold {commit_every}, "
+                                        f"wait {commit_catchup_time}s to let commit catchup"
+                                    )
                                     await sleep(commit_catchup_time)
                             await callback(message)
                             set_read_offset(tp, offset)

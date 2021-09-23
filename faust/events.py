@@ -15,6 +15,7 @@ from faust.types import (
     RecordMetadata,
     SchemaT,
     V,
+    FutureMessage,
 )
 
 if typing.TYPE_CHECKING:  # pragma: no cover
@@ -255,6 +256,10 @@ class Event(EventT):
             value_serializer=value_serializer,
             callback=callback,
         )
+
+    def attach(self, fut_msg: FutureMessage) -> None:
+        attachments = cast(_App, self.app)._attachments
+        attachments.put_fut(self.message, fut_msg)
 
     def ack(self) -> bool:
         """Acknowledge event as being processed by stream.

@@ -6,9 +6,10 @@ from typing import Any, Mapping, Optional, Pattern, Sequence, Set, Union
 from mode import Seconds
 from mode.utils.queues import ThrowableQueue
 
+from .core import HeadersArg, K, V
 from .channels import ChannelT
 from .codecs import CodecArg
-from .tuples import TP
+from .tuples import TP, MessageSentCallback, FutureMessage
 
 if typing.TYPE_CHECKING:
     from .app import AppT as _AppT
@@ -133,4 +134,22 @@ class TopicT(ChannelT):
         suffix: str = "",
         **kwargs: Any
     ) -> "TopicT":
+        ...
+
+    @abc.abstractmethod
+    def send_attached(
+        self,
+        *,
+        key: K = None,
+        value: V = None,
+        partition: int = None,
+        timestamp: float = None,
+        headers: HeadersArg = None,
+        schema: _SchemaT = None,
+        key_serializer: CodecArg = None,
+        value_serializer: CodecArg = None,
+        callback: MessageSentCallback = None,
+        force: bool = False,
+        eager_partitioning: bool = False
+    ) -> FutureMessage:
         ...
