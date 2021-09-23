@@ -844,10 +844,10 @@ class Stream(StreamT[T_co], Service):
         sensor_state: Optional[Dict] = None
         skipped_value = self._skipped_value
 
-        event_samples = 10
+        event_samples = self.app.conf.slow_sample_size
+        commit_catchup_time = self.app.conf.commit_catchup_time
+        slow_processing_time = self.app.conf.slow_processing_time
         sample_proc_times = RingBuffer(event_samples, lambda: 0)
-        event_sample_ratio = event_samples / self.app.conf.broker_commit_every
-        commit_catchup_slice = self.app.conf.commit_catchup_time * event_sample_ratio
 
         try:
             while not self.should_stop:
@@ -921,10 +921,10 @@ class Stream(StreamT[T_co], Service):
                     proc_time = time.time() - start
                     sample_proc_times.put(proc_time)
                     avg_proc_time = sum(sample_proc_times._ring) / sample_proc_times.size
-                    if avg_proc_time > self.app.conf.slow_processing_time:
+                    if avg_proc_time > slow_processing_time:
                         self.log.info(f"Sampled avg proc time {avg_proc_time}s too slow"
-                                      f"wait {commit_catchup_slice}s to let commit catchup")
-                        await asyncio.sleep(commit_catchup_slice)
+                                      f"wait {commit_catchup_time}s to let commit catchup")
+                        await asyncio.sleep(commit_catchup_time)
                 finally:
                     self.current_event = None
                     if do_ack and event is not None:
