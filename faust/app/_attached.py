@@ -8,7 +8,6 @@ from collections import defaultdict
 from heapq import heappop, heappush
 from typing import (
     Awaitable,
-    Callable,
     Iterator,
     List,
     MutableMapping,
@@ -84,7 +83,8 @@ class Attachments:
     @cached_property
     def enabled(self) -> bool:
         """Return :const:`True` if attachments are enabled."""
-        return self.app.conf.stream_publish_on_commit
+        return True
+        # return self.app.conf.stream_publish_on_commit
 
     async def maybe_put(
         self,
@@ -98,46 +98,40 @@ class Attachments:
         key_serializer: CodecArg = None,
         value_serializer: CodecArg = None,
         callback: MessageSentCallback = None,
-        force: bool = False,
     ) -> Awaitable[RecordMetadata]:
-        """Attach message to source topic offset.
-
-        This will send the message immediately if attachments
-        are disabled.
+        """Associate produced message to current event's source topic offset
         """
         # XXX The concept of attaching should be deprecated when we
         # have Kafka transaction support (:kip:`KIP-98`).
         # This is why the interface related to attaching is private.
 
+        event = current_event()
         # attach message to current event if there is one.
-        send: Callable = self.app.send
-        if self.enabled and not force:
-            event = current_event()
-            if event is not None:
-                return cast(_Event, event)._attach(
-                    channel,
-                    key,
-                    value,
-                    partition=partition,
-                    timestamp=timestamp,
-                    headers=headers,
-                    schema=schema,
-                    key_serializer=key_serializer,
-                    value_serializer=value_serializer,
-                    callback=callback,
-                )
-        return await send(
-            channel,
-            key,
-            value,
-            partition=partition,
-            timestamp=timestamp,
-            headers=headers,
-            schema=schema,
-            key_serializer=key_serializer,
-            value_serializer=value_serializer,
-            callback=callback,
-        )
+        if event is not None:
+            return cast(_Event, event).send(
+                channel=channel,
+                key=key,
+                value=value,
+                partition=partition,
+                timestamp=timestamp,
+                headers=headers,
+                schema=schema,
+                key_serializer=key_serializer,
+                value_serializer=value_serializer,
+                callback=callback,
+            )
+        else:
+            return channel.send_soon(
+                key=key,
+                value=value,
+                partition=partition,
+                timestamp=timestamp,
+                headers=headers,
+                schema=schema,
+                key_serializer=key_serializer,
+                value_serializer=value_serializer,
+                callback=callback,
+            )
 
     def put(
         self,
@@ -162,16 +156,16 @@ class Attachments:
         # tuples.
         buf = self._pending[message.tp]
         chan = self.app.topic(channel) if isinstance(channel, str) else channel
-        fut = chan.as_future_message(
-            key,
-            value,
-            partition,
-            timestamp,
-            headers,
-            schema,
-            key_serializer,
-            value_serializer,
-            callback,
+        fut = chan.send_soon(
+            key=key,
+            value=value,
+            partition=partition,
+            timestamp=timestamp,
+            headers=headers,
+            schema=schema,
+            key_serializer=key_serializer,
+            value_serializer=value_serializer,
+            callback=callback,
         )
         # Note: Since FutureMessage have members that are unhashable
         # we wrap it in an Unordered object to stop heappush from crashing.
@@ -180,14 +174,10 @@ class Attachments:
         heappush(buf, Attachment(message.offset, Unordered(fut)))
         return fut
 
-    def put_fut(
-        self,
-        src_msg: Message,
-        fut_msg: FutureMessage,
-    ) -> None:
+    def put_fut(self, message: Message, future_message: FutureMessage,) -> None:
         """Attach message to source topic offset."""
-        buf = self._pending[src_msg.tp]
-        heappush(buf, Attachment(src_msg.offset, Unordered(fut_msg)))
+        buf = self._pending[message.tp]
+        heappush(buf, Attachment(message.offset, Unordered(future_message)))
 
     async def commit(self, tp: TP, offset: int) -> None:
         """Publish all messaged attached to topic partition and offset."""

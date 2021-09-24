@@ -142,7 +142,6 @@ class Event(EventT):
         key_serializer: CodecArg = None,
         value_serializer: CodecArg = None,
         callback: MessageSentCallback = None,
-        force: bool = False,
     ) -> Awaitable[RecordMetadata]:
         """Send object to channel."""
         if key is USE_EXISTING_KEY:
@@ -162,7 +161,6 @@ class Event(EventT):
             key_serializer,
             value_serializer,
             callback,
-            force=force,
         )
 
     async def forward(
@@ -177,7 +175,6 @@ class Event(EventT):
         key_serializer: CodecArg = None,
         value_serializer: CodecArg = None,
         callback: MessageSentCallback = None,
-        force: bool = False,
     ) -> Awaitable[RecordMetadata]:
         """Forward original message (will not be reserialized)."""
         if key is USE_EXISTING_KEY:
@@ -199,7 +196,6 @@ class Event(EventT):
             key_serializer,
             value_serializer,
             callback,
-            force=force,
         )
 
     async def _send(
@@ -214,21 +210,20 @@ class Event(EventT):
         key_serializer: CodecArg = None,
         value_serializer: CodecArg = None,
         callback: MessageSentCallback = None,
-        force: bool = False,
     ) -> Awaitable[RecordMetadata]:
-        return await cast(_App, self.app)._attachments.maybe_put(
-            channel,
-            key,
-            value,
-            partition,
-            timestamp,
-            headers,
-            schema,
-            key_serializer,
-            value_serializer,
-            callback,
-            force=force,
+        fut = channel.send_soon(
+            key=key,
+            value=value,
+            partition=partition,
+            timestamp=timestamp,
+            headers=headers,
+            schema=schema,
+            key_serializer=key_serializer,
+            value_serializer=value_serializer,
+            callback=callback,
         )
+        cast(_App, self.app)._attachments.put_fut(self.message, fut)
+        return fut
 
     def _attach(
         self,
@@ -243,18 +238,17 @@ class Event(EventT):
         value_serializer: CodecArg = None,
         callback: MessageSentCallback = None,
     ) -> Awaitable[RecordMetadata]:
-        return cast(_App, self.app)._attachments.put(
-            self.message,
+        return self._send(
             channel,
             key,
             value,
-            partition=partition,
-            timestamp=timestamp,
-            headers=headers,
-            schema=schema,
-            key_serializer=key_serializer,
-            value_serializer=value_serializer,
-            callback=callback,
+            partition,
+            timestamp,
+            headers,
+            schema,
+            key_serializer,
+            value_serializer,
+            callback,
         )
 
     def attach(self, fut_msg: FutureMessage) -> None:

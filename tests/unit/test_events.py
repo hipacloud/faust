@@ -200,7 +200,6 @@ class Test_Event:
             "kser",
             "vser",
             callback,
-            force=True,
         )
 
     def test_repr(self, *, event):

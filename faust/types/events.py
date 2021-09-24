@@ -62,7 +62,6 @@ class EventT(Generic[T], AsyncContextManager):
         key_serializer: CodecArg = None,
         value_serializer: CodecArg = None,
         callback: MessageSentCallback = None,
-        force: bool = False,
     ) -> Awaitable[RecordMetadata]:
         ...
 
@@ -79,7 +78,6 @@ class EventT(Generic[T], AsyncContextManager):
         key_serializer: CodecArg = None,
         value_serializer: CodecArg = None,
         callback: MessageSentCallback = None,
-        force: bool = False,
     ) -> Awaitable[RecordMetadata]:
         ...
 

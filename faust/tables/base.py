@@ -277,41 +277,25 @@ class Collection(Service, CollectionT):
     ) -> FutureMessage:
         """Send modification event to changelog topic."""
 
-        if self.app.conf.stream_publish_on_commit:
-            if key_serializer is None:
-                key_serializer = self.key_serializer
-            if value_serializer is None:
-                value_serializer = self.value_serializer
+        if key_serializer is None:
+            key_serializer = self.key_serializer
+        if value_serializer is None:
+            value_serializer = self.value_serializer
 
-            event = cast(Event, current_event())
-            callback = partial(
-                self._on_attached_changelog_sent,
-                event,
-            )
+        event = cast(Event, current_event())
+        callback = partial(self._on_attached_changelog_sent, event)
 
-            fut = self.changelog_topic.send_soon(
-                key=key,
-                value=value,
-                partition=partition,
-                key_serializer=key_serializer,
-                value_serializer=value_serializer,
-                callback=callback,
-            )
+        fut = self.changelog_topic.send_soon(
+            key=key,
+            value=value,
+            partition=partition,
+            key_serializer=key_serializer,
+            value_serializer=value_serializer,
+            callback=callback,
+        )
 
-            event.attach(fut)
-            return fut
-
-        else:
-            return self.changelog_topic.send_soon(
-                key=key,
-                value=value,
-                partition=partition,
-                key_serializer=key_serializer,
-                value_serializer=value_serializer,
-                callback=self._on_changelog_sent,
-                # Ensures final partition number is ready in ret.message.partition
-                eager_partitioning=True,
-            )
+        event.attach(fut)
+        return fut
 
     def _send_changelog(
         self,
@@ -376,18 +360,20 @@ class Collection(Service, CollectionT):
         # Every partition in the table will have its own database file,
         #  this is required as partitions can easily move from and to
         #  machine as nodes die and recover.
-        res: RecordMetadata = fut.result()
+        src_message = event.message
+        sink_record: RecordMetadata = fut.result()
+
         if self.app.in_transaction:
             # for exactly-once semantics we only write the
             # persisted offset to RocksDB on disk when that partition
             # is committed.
             self.app.tables.persist_offset_on_commit(
-                self.data, event.message.tp, res.offset
+                self.data, src_message.tp, sink_record.offset
             )
         else:
             # for normal processing (at-least-once) we just write
             # the persisted offset immediately.
-            self.data.set_persisted_offset(event.message.tp, res.offset)
+            self.data.set_persisted_offset(src_message.tp, sink_record.offset)
 
     def _on_changelog_sent(self, fut: FutureMessage) -> None:
         # This is what keeps the offset in RocksDB so that at startup
@@ -614,9 +600,7 @@ class Collection(Service, CollectionT):
 
     def _windowed_delta(self, key: Any, d: Seconds, event: EventT = None) -> Any:
         window = cast(WindowT, self.window)
-        return self._get_key(
-            (key, window.delta(self._relative_event(event), d)),
-        )
+        return self._get_key((key, window.delta(self._relative_event(event), d)),)
 
     async def on_rebalance(
         self,
@@ -673,9 +657,7 @@ class Collection(Service, CollectionT):
     def apply_changelog_batch(self, batch: Iterable[EventT]) -> None:
         """Apply batch of events from changelog topic local table storage."""
         self.data.apply_changelog_batch(
-            batch,
-            to_key=self._to_key,
-            to_value=self._to_value,
+            batch, to_key=self._to_key, to_value=self._to_value,
         )
 
     def _to_key(self, k: Any) -> Any:

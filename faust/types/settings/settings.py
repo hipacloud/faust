@@ -1589,10 +1589,14 @@ class Settings(base.SettingsRegistry):
 
     @sections.Stream.setting(
         params.Bool,
-        default=False,
+        default=True,
+        version_deprecated="0.6.9.post12",
+        deprecation_reason="This has to be enabled to ensure state store consistency",
     )
     def stream_publish_on_commit(self) -> bool:
-        """Stream delay producing until commit time.
+        """Deprecated setting has no effect.
+
+        Stream delay producing until commit time.
 
         If enabled we buffer up sending messages until the
         source topic offset related to that processing is committed.
